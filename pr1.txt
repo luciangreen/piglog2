@@ -1,0 +1,1675 @@
+Below is an implementation-ready requirements document reflecting Piglog 2 as a converter that estimates runtime during conversion and directly inserts SWI-Prolog concurrency constructs. The generated program contains no Piglog scheduler or runtime decision heuristics.
+
+Piglog 2 Prolog Program Requirements
+
+1. Project title
+
+Piglog 2: Automatic Concurrent-Prolog Converter and REPL Runner
+
+2. Purpose
+
+Piglog 2 is a source-to-source Prolog converter for SWI-Prolog.
+
+It replaces the original Piglog design.
+
+Piglog 2 analyses ordinary Prolog code, estimates the runtime cost of executable sections, identifies sufficiently long independent sections, and inserts direct SWI-Prolog concurrency constructs where concurrent execution is appropriate.
+
+Piglog 2 must:
+
+* preserve ordinary sequential code where concurrency is inappropriate;
+* insert concurrency only into sections estimated to be long enough to benefit;
+* insert SWI-Prolog concurrency constructs directly into generated code;
+* avoid inserting a Piglog-specific runtime scheduler;
+* avoid placing runtime cost heuristics in generated programs;
+* provide REPL commands to output, run, or output and run converted Piglog code.
+
+Piglog 2 does not formally verify semantic equivalence between the original and converted programs.
+
+3. Core definition
+
+Piglog 2 is:
+
+A SWI-Prolog source converter that estimates the likely runtime of program sections during conversion and inserts direct concurrent constructs into sufficiently expensive independent sections.
+
+The converter makes the concurrency decision before the generated program runs.
+
+Generated Piglog code must not repeatedly decide at runtime whether a section should execute concurrently.
+
+4. Primary target
+
+The first implementation must target:
+
+* SWI-Prolog;
+* ordinary Prolog source syntax;
+* execution inside an SWI-Prolog session;
+* direct output as valid SWI-Prolog source code;
+* SWI-Prolog threads and concurrency libraries.
+
+Portability to other Prolog implementations is not required.
+
+The generated code may use facilities such as:
+
+:- use_module(library(thread)).
+
+and appropriate direct concurrency predicates.
+
+SWI-Prolog provides concurrent/3 for running independent goals using multiple threads. Its documentation requires the goals to be independent and thread-safe and states that they must not communicate through shared variables or global data. Piglog 2 must respect these restrictions when selecting that construct. SWI-Prolog also provides concurrent map operations for suitable list-processing patterns. (⁠SWI-Prolog)
+
+5. Non-goals
+
+The first release must not attempt to provide:
+
+* a new Prolog virtual machine;
+* a separate Piglog execution engine;
+* a Piglog runtime scheduler;
+* runtime speculation about whether concurrency will be beneficial;
+* dynamic redistribution of goals based on current load;
+* formal semantic-equivalence proofs;
+* automatic conversion of all Prolog code into concurrent code;
+* distributed computing across multiple machines;
+* GPU execution;
+* portability to non-SWI Prolog systems;
+* integration with Detlog, PLOP, Loop2, or Spec to Algorithm as a requirement;
+* speculative execution of goals whose required inputs are unavailable;
+* automatic repair of unsafe source programs.
+
+Piglog 2 may be integrated with other converter projects later, but the initial repository must work independently.
+
+6. Terminology
+
+6.1 Source program
+
+The ordinary Prolog program supplied to Piglog 2.
+
+6.2 Piglog code
+
+The converted SWI-Prolog code containing concurrency constructs inserted by Piglog 2.
+
+“Piglog code” does not denote a new surface language. It is generated SWI-Prolog.
+
+6.3 Executable section
+
+A goal or ordered group of goals that may be considered as one analysis unit.
+
+Examples include:
+
+* a predicate body;
+* a conjunction within a predicate body;
+* one branch of an if-then-else;
+* a list-processing operation;
+* an explicitly delimited block;
+* a group of adjacent independent calls.
+
+6.4 Candidate group
+
+Two or more executable sections that may be able to run concurrently.
+
+6.5 Long-enough section
+
+A section whose estimated runtime exceeds the converter’s configured minimum concurrency threshold.
+
+6.6 Conversion-time estimate
+
+A runtime-cost estimate calculated by the Piglog 2 converter before generated code is executed.
+
+6.7 Direct concurrency construct
+
+A standard SWI-Prolog concurrency or thread construct written directly into generated code.
+
+It is not a call to a Piglog scheduler.
+
+7. System architecture
+
+Piglog 2 must contain the following main components:
+
+1. source reader;
+2. source representation;
+3. predicate and clause analyser;
+4. variable-dependency analyser;
+5. effect and thread-safety analyser;
+6. runtime estimator;
+7. concurrent-region selector;
+8. source transformer;
+9. generated-code printer;
+10. generated-code loader;
+11. REPL command interface;
+12. diagnostics and reporting system;
+13. automated test suite.
+
+The initial architecture should remain simple and understandable.
+
+8. Required conversion pipeline
+
+The converter must perform the following stages:
+
+Read Prolog source
+→ preserve source terms and declarations
+→ identify predicates and clauses
+→ divide clause bodies into executable sections
+→ analyse variable inputs and outputs
+→ identify dependencies between sections
+→ identify effects and unsafe operations
+→ estimate runtime costs
+→ identify independent, sufficiently long candidate groups
+→ choose an appropriate SWI-Prolog concurrency construct
+→ transform selected groups
+→ retain all other code sequentially
+→ emit Piglog code
+→ optionally load and run the generated code
+
+The converter is not required to prove that the transformation is semantically equivalent.
+
+It must nevertheless apply conservative syntactic and operational safety rules before inserting concurrency.
+
+9. REPL operation
+
+Piglog 2 must operate from within an SWI-Prolog REPL.
+
+A user must be able to load Piglog 2 and enter source terms or convert a source file without leaving SWI-Prolog.
+
+Example startup:
+
+?- use_module(piglog2).
+
+10. Required REPL commands
+
+Piglog 2 must provide three principal actions:
+
+1. output converted Piglog code;
+2. run converted Piglog code;
+3. output and run converted Piglog code.
+
+10.1 Output only
+
+Required conceptual interface:
+
+?- piglog_output(Source).
+
+This command must:
+
+* convert the specified source;
+* print the generated Piglog code;
+* not execute the generated program.
+
+Alternative explicit form:
+
+?- piglog(Source, output).
+
+10.2 Run only
+
+Required conceptual interface:
+
+?- piglog_run(Source).
+
+This command must:
+
+* convert the source;
+* load the converted code into a generated module or temporary source file;
+* execute the requested entry goal;
+* not print all generated code unless an error occurs or tracing is enabled.
+
+An entry goal may be supplied explicitly:
+
+?- piglog_run(Source, Goal).
+
+Alternative explicit form:
+
+?- piglog(Source, run(Goal)).
+
+10.3 Output and run
+
+Required conceptual interface:
+
+?- piglog_output_run(Source, Goal).
+
+This command must:
+
+* convert the source;
+* print the generated Piglog code;
+* load the generated code;
+* execute the entry goal;
+* report the result.
+
+Alternative explicit form:
+
+?- piglog(Source, output_and_run(Goal)).
+
+10.4 Interactive term conversion
+
+The REPL must optionally accept a clause or predicate definition directly:
+
+?- piglog_begin.
+|: result(A, B) :-
+|:     expensive_a(A),
+|:     expensive_b(B).
+|: end_of_file.
+
+The user must then be able to request:
+
+?- piglog_output.
+?- piglog_run(result(A, B)).
+
+or:
+
+?- piglog_output_run(result(A, B)).
+
+10.5 File conversion
+
+Required file interfaces:
+
+piglog_output_file(+InputFile).
+piglog_output_file(+InputFile, +OutputFile).
+piglog_run_file(+InputFile, +EntryGoal).
+piglog_output_run_file(+InputFile, +OutputFile, +EntryGoal).
+
+11. Generated module handling
+
+Generated code must be loaded into a separate module by default.
+
+A generated module name may be derived from:
+
+* the input filename;
+* a unique conversion identifier;
+* a user-supplied module option.
+
+Example:
+
+piglog_generated_example_1
+
+The generated module must not silently overwrite predicates in the user module.
+
+A reload option must allow a previously generated module to be replaced.
+
+12. Source-language support
+
+The initial converter must support ordinary SWI-Prolog syntax for:
+
+* facts;
+* rules;
+* conjunction;
+* if-then-else;
+* deterministic calls;
+* semideterministic calls;
+* recursion;
+* list recursion;
+* arithmetic;
+* comparison;
+* module declarations;
+* common library imports;
+* meta-predicate declarations where they can be preserved safely;
+* calls to user-defined predicates;
+* calls to recognised built-in predicates.
+
+Unsupported constructs must normally be left sequential rather than rejected.
+
+13. Fundamental transformation rule
+
+Piglog 2 may insert concurrency only when all of the following hold:
+
+1. there are at least two candidate sections;
+2. the sections do not require each other’s outputs;
+3. all required input variables are available before concurrent execution starts;
+4. each section is estimated to be long enough, or the combined group is estimated to provide a worthwhile saving;
+5. the sections are considered thread-safe under Piglog 2’s supported analysis;
+6. concurrent execution will not reorder prohibited effects;
+7. the generated construct can return required results correctly;
+8. the concurrency-group size does not exceed the configured limit.
+
+The decision must be made by the converter.
+
+The generated program must not contain Piglog code that re-estimates these conditions at runtime.
+
+14. Basic transformation example
+
+Source:
+
+report(Input, Report) :-
+    analyse_text(Input, TextResult),
+    analyse_numbers(Input, NumberResult),
+    combine_results(TextResult, NumberResult, Report).
+
+Possible generated form:
+
+report(Input, Report) :-
+    piglog2_generated_pair(
+        analyse_text(Input, TextResult),
+        analyse_numbers(Input, NumberResult)
+    ),
+    combine_results(TextResult, NumberResult, Report).
+
+However, the final generated form must not rely on a general Piglog scheduler.
+
+If a generated helper predicate is needed, it must be a fixed transformation-specific wrapper implemented directly with SWI-Prolog thread constructs.
+
+For example, the converter may generate a specialised helper containing:
+
+* thread_create/3;
+* thread-local result communication;
+* thread_join/2;
+* exception propagation;
+* deterministic result collection.
+
+SWI-Prolog’s thread_create/3 creates a Prolog thread to run a goal, while thread_join/2 waits for a joinable thread and retrieves its termination status. (⁠SWI-Prolog)
+
+The generated helper must be specific executable concurrency code, not a Piglog runtime planning or scheduling directive.
+
+15. Direct concurrent/3 transformation
+
+Where goals:
+
+* are independent;
+* do not need to communicate result variables;
+* do not modify shared global data;
+* are thread-safe;
+* are sufficiently expensive;
+
+Piglog 2 may emit:
+
+concurrent(
+    ThreadCount,
+    [Goal1, Goal2, Goal3],
+    []
+).
+
+Example source:
+
+prepare :-
+    rebuild_index,
+    regenerate_cache,
+    precompute_tables.
+
+Possible output:
+
+prepare :-
+    concurrent(
+        3,
+        [
+            rebuild_index,
+            regenerate_cache,
+            precompute_tables
+        ],
+        []
+    ).
+
+This transformation is appropriate only where the goals do not need to exchange bindings through shared variables.
+
+16. Concurrent output-producing goals
+
+Independent goals commonly produce outputs needed by a later goal:
+
+answer(Input, Answer) :-
+    calculate_left(Input, Left),
+    calculate_right(Input, Right),
+    combine(Left, Right, Answer).
+
+Because independent SWI-Prolog threads do not simply communicate by binding ordinary shared variables, Piglog 2 must generate explicit result transport for this pattern.
+
+A generated transformation may conceptually use:
+
+answer(Input, Answer) :-
+    message_queue_create(Queue),
+    setup_call_cleanup(
+        true,
+        (
+            thread_create(
+                piglog_worker_result(
+                    Queue,
+                    left,
+                    calculate_left(Input, Left),
+                    Left
+                ),
+                LeftThread,
+                []
+            ),
+            thread_create(
+                piglog_worker_result(
+                    Queue,
+                    right,
+                    calculate_right(Input, Right),
+                    Right
+                ),
+                RightThread,
+                []
+            ),
+            piglog_collect_pair(
+                Queue,
+                LeftThread,
+                RightThread,
+                Left,
+                Right
+            )
+        ),
+        message_queue_destroy(Queue)
+    ),
+    combine(Left, Right, Answer).
+
+The actual generated implementation should be simpler where possible.
+
+The helper predicates must perform fixed duties such as:
+
+* running one supplied transformed goal;
+* sending a result;
+* collecting a known number of results;
+* joining known worker threads;
+* propagating exceptions.
+
+They must not:
+
+* estimate runtime;
+* decide whether to create concurrency;
+* construct a dependency graph;
+* dynamically select arbitrary tasks;
+* operate as a general Piglog scheduler.
+
+SWI-Prolog message queues provide a supported mechanism for communication and waiting between threads. (⁠SWI-Prolog)
+
+17. Concurrent map transformations
+
+Piglog 2 should recognise sequential map-style operations such as:
+
+maplist(expensive_transform, Inputs, Outputs)
+
+When the mapped operation is estimated to be sufficiently expensive and considered thread-safe, the converter may generate:
+
+concurrent_maplist(expensive_transform, Inputs, Outputs)
+
+The converter may support the corresponding arities provided by SWI-Prolog.
+
+It must not convert inexpensive map operations merely because a concurrent map predicate exists.
+
+SWI-Prolog’s concurrent map implementation uses worker threads and limits the worker count according to the list length and available cores. (⁠SWI-Prolog)
+
+18. Runtime estimation
+
+18.1 Conversion-time only
+
+Runtime estimation must be performed by the converter.
+
+The generated program must not contain code such as:
+
+should_run_concurrently(Goal)
+
+or:
+
+estimate_goal_runtime(Goal, Cost)
+
+unless the user explicitly requests an instrumented diagnostic build.
+
+The normal generated program must already contain the converter’s final sequential or concurrent choice.
+
+18.2 Estimation sources
+
+The converter may estimate runtime using one or more of:
+
+* measured predicate execution;
+* representative benchmark calls;
+* previously stored measurements;
+* user declarations;
+* recursive structure;
+* known built-in cost classifications;
+* loop sizes where statically available;
+* list lengths where statically available;
+* clause-body operation counts;
+* call-graph costs;
+* estimated recursion depth;
+* known input-size declarations.
+
+These are converter mechanisms, not generated-code heuristics.
+
+18.3 Preferred initial implementation
+
+The first implementation should favour measured estimation where a safe representative call is available.
+
+A simple initial process is:
+
+1. identify a candidate predicate;
+2. execute a supplied or inferred benchmark call sequentially;
+3. use repeated timing measurements;
+4. calculate a robust representative runtime;
+5. store the measurement in the conversion report;
+6. compare the measurement with the configured threshold;
+7. insert concurrency only when the estimate passes the threshold.
+
+18.4 Static fallback
+
+When a predicate cannot safely be executed during conversion, Piglog 2 may use a static estimate.
+
+The static estimate should be described as an estimate rather than a verified execution time.
+
+18.5 User declarations
+
+The user may provide declarations such as:
+
+:- piglog_cost(expensive_a/1, milliseconds(40)).
+:- piglog_cost(expensive_b/1, milliseconds(55)).
+
+or:
+
+:- piglog_long(expensive_a/1).
+
+A numerical cost declaration should take precedence over the default static estimate.
+
+18.6 Benchmark examples
+
+The user may provide representative benchmark goals:
+
+:- piglog_benchmark(
+       analyse_text/2,
+       analyse_text("representative text", _)
+   ).
+
+The converter may time this goal while analysing the source.
+
+18.7 Estimation threshold
+
+A configurable minimum expected benefit must be supported:
+
+:- piglog_minimum_concurrent_time(milliseconds(10)).
+
+The default value must be documented and changeable.
+
+The threshold is applied during conversion.
+
+18.8 Group estimate
+
+For two independent sections with estimated sequential costs:
+
+T1 and T2
+
+the converter may estimate:
+
+sequential time = T1 + T2
+concurrent time = max(T1, T2) + concurrency overhead
+estimated saving = sequential time - concurrent time
+
+Concurrency should be inserted only when the estimated saving exceeds the configured minimum saving.
+
+This calculation occurs in the converter.
+
+It is not emitted into the generated source.
+
+18.9 Calibration
+
+Piglog 2 should support a calibration command:
+
+?- piglog_calibrate.
+
+Calibration may measure approximate local costs for:
+
+* creating a thread;
+* joining a thread;
+* sending and receiving a queue message;
+* executing a trivial concurrent group;
+* invoking concurrent/3.
+
+These measurements may help the converter estimate concurrency overhead on the current computer.
+
+Calibration results may be stored in a local Piglog 2 configuration file.
+
+19. No code-level heuristics
+
+The phrase “no heuristics in the code” means:
+
+* generated Piglog code must not contain dynamic profitability tests;
+* generated Piglog code must not select between sequential and concurrent versions based on current input;
+* generated Piglog code must not monitor processor load to choose a path;
+* generated Piglog code must not defer concurrency decisions to a Piglog runtime;
+* generated Piglog code must not dynamically repartition predicates.
+
+The converter may use an estimator to make a conversion-time decision.
+
+Once generated, the selected structure is fixed until the program is reconverted.
+
+20. Dependency analysis
+
+Piglog 2 must analyse variable flow through each conjunction.
+
+Example:
+
+p(Input, Output) :-
+    a(Input, A),
+    b(Input, B),
+    c(A, B, Output).
+
+The dependency graph is:
+
+Input → a → A ─┐
+               ├→ c → Output
+Input → b → B ─┘
+
+a/2 and b/2 are concurrency candidates because neither requires the other’s output.
+
+By contrast:
+
+p(Input, Output) :-
+    a(Input, A),
+    b(A, B),
+    c(B, Output).
+
+must remain sequential because:
+
+a → b → c
+
+20.1 Variable availability
+
+Before grouping goals concurrently, the analyser must determine:
+
+* variables available before the group;
+* variables consumed by each goal;
+* variables produced by each goal;
+* variables consumed after the group;
+* variables appearing in more than one candidate goal.
+
+20.2 Shared input variables
+
+A value may be supplied as an input to multiple concurrent sections.
+
+Example:
+
+a(Input, A)
+b(Input, B)
+
+This is allowed if Input is sufficiently instantiated before the group and is used read-only.
+
+20.3 Shared output variables
+
+Two concurrent goals must not independently produce or constrain the same output variable in the initial release.
+
+Example:
+
+a(Input, X),
+b(Input, X)
+
+must remain sequential unless a future transformation explicitly supports this pattern.
+
+20.4 Partial structures
+
+The first implementation should conservatively reject concurrent grouping where two goals operate on overlapping parts of the same partially instantiated structure.
+
+21. Section formation
+
+The converter should initially partition conjunctions at predicate-call boundaries.
+
+Example:
+
+p :-
+    a,
+    b,
+    c,
+    d.
+
+produces four initial sections:
+
+a
+b
+c
+d
+
+The analyser may combine adjacent dependent calls into larger sequential sections.
+
+Example:
+
+p(Input, Output) :-
+    load(Input, Data),
+    normalise(Data, Normalised),
+    inspect(Input, Inspection),
+    combine(Normalised, Inspection, Output).
+
+Possible sections:
+
+Section 1:
+    load(Input, Data),
+    normalise(Data, Normalised)
+Section 2:
+    inspect(Input, Inspection)
+Continuation:
+    combine(Normalised, Inspection, Output)
+
+Section 1 and Section 2 may run concurrently if their estimated costs justify it.
+
+This supports concurrency at a scale larger than one short predicate call.
+
+22. Long sections
+
+Piglog 2 must be able to group dependent calls into one long sequential worker.
+
+Example:
+
+a(Input, A),
+b(A, B),
+c(B, C)
+
+may become one worker section while an independent chain:
+
+x(Input, X),
+y(X, Y)
+
+becomes another worker section.
+
+Conceptually:
+
+worker_1(Input, C) :-
+    a(Input, A),
+    b(A, B),
+    c(B, C).
+worker_2(Input, Y) :-
+    x(Input, X),
+    y(X, Y).
+
+The two worker predicates may then be run concurrently.
+
+This is important because individual calls may be too short, while complete independent chains may be long enough to justify threads.
+
+23. If-then-else handling
+
+Piglog 2 must treat the selected branch of an if-then-else as dependent on its condition.
+
+Example:
+
+p(Input, Output) :-
+    classify(Input, Class),
+    (   Class = large
+    ->  process_large(Input, Output)
+    ;   process_small(Input, Output)
+    ).
+
+The two branches must not be run concurrently because only one branch should execute.
+
+However, independent long sections inside the same selected branch may be considered for conversion.
+
+Example:
+
+(   Condition
+->  long_a(Input, A),
+    long_b(Input, B),
+    combine(A, B, Output)
+;   fallback(Input, Output)
+)
+
+long_a/2 and long_b/2 may be transformed within the then-branch.
+
+24. Disjunction and nondeterminism
+
+The initial release must conservatively avoid inserting concurrency across:
+
+* disjunction branches;
+* ordinary nondeterministic choicepoints;
+* generators whose solutions are consumed through backtracking;
+* goals relying on answer order;
+* goals relying on pruning with cut;
+* goals whose number of solutions is unknown.
+
+A deterministic operation inside one branch may still be converted if it independently satisfies all Piglog 2 requirements.
+
+25. Determinism analysis
+
+The converter should classify recognised predicates as:
+
+* deterministic;
+* semideterministic;
+* nondeterministic;
+* multi;
+* unknown.
+
+Initial concurrency insertion should be limited primarily to deterministic or safely semideterministic sections.
+
+Unknown predicates must remain sequential unless the user supplies an appropriate declaration.
+
+Example:
+
+:- piglog_deterministic(expensive_analysis/2).
+
+This declaration informs the converter but does not constitute formal verification.
+
+26. Failure behaviour
+
+Concurrent sections introduce questions about failure.
+
+The initial release must define a predictable policy.
+
+26.1 Required default
+
+For a group of deterministic or semideterministic workers:
+
+* if all workers succeed, collect all results;
+* if any worker fails, the group fails;
+* remaining workers should be joined or cancelled safely where supported;
+* thread resources must be reclaimed;
+* no worker exception may be silently discarded.
+
+26.2 No speculative success
+
+Piglog 2 must not return success before all required concurrent workers have completed.
+
+26.3 Semideterministic sections
+
+Semideterministic sections may be grouped only if concurrent failure does not reorder prohibited effects and all resource cleanup is defined.
+
+27. Exception behaviour
+
+Generated concurrent code must:
+
+* catch worker exceptions;
+* communicate the exception to the parent thread;
+* join or clean up all created workers;
+* rethrow an appropriate exception in the caller;
+* preserve useful context about the failing worker;
+* avoid leaving orphaned joinable threads.
+
+A worker exception report should identify:
+
+* source predicate;
+* source clause location where available;
+* worker section;
+* original exception term.
+
+28. Cuts
+
+The initial release must not move goals across a cut.
+
+Example:
+
+p :-
+    a,
+    !,
+    b,
+    c.
+
+The cut is a hard conversion boundary.
+
+Piglog 2 may separately analyse:
+
+before the cut
+after the cut
+
+but it must not create a concurrent group spanning the cut.
+
+Goals after the cut may be made concurrent only if otherwise suitable.
+
+29. Side effects
+
+Piglog 2 must treat side-effecting operations conservatively.
+
+The following should normally prevent concurrent grouping or form hard ordering boundaries:
+
+* writing to standard output;
+* reading from standard input;
+* file writes;
+* opening and closing shared streams;
+* assert/1;
+* assertz/1;
+* asserta/1;
+* retract/1;
+* retractall/1;
+* global variable mutation;
+* non-backtrackable assignment;
+* process creation;
+* shell commands;
+* network writes;
+* device operations;
+* robot actuator operations;
+* database writes;
+* foreign predicates not declared thread-safe.
+
+Example:
+
+p :-
+    expensive_a(A),
+    writeln(A),
+    expensive_b(B).
+
+Piglog 2 must not move expensive_b/1 before or alongside writeln/1 unless the user has explicitly declared the effect ordering safe and a supported transformation exists.
+
+30. Thread safety
+
+Piglog 2 must maintain a configurable database of recognised thread-safe and thread-unsafe predicates.
+
+Example declarations:
+
+:- piglog_thread_safe(my_analysis/2).
+:- piglog_thread_unsafe(my_writer/1).
+
+Unknown external predicates must be treated as unsafe by default.
+
+Thread-safety declarations influence conversion but are not formal proofs.
+
+31. Input instantiation
+
+A concurrent worker should normally receive sufficiently instantiated inputs.
+
+The initial implementation should avoid launching a worker where its principal input remains an unconstrained variable.
+
+Example:
+
+p(Output) :-
+    expensive_unknown_input(X, A),
+    create_x(X),
+    combine(A, Output).
+
+The first call must not be moved to run before create_x/1.
+
+32. Recursive predicates
+
+Recursive predicates may be analysed, but the first release must not automatically create one new thread per recursive call.
+
+This prevents unbounded thread creation.
+
+The converter may:
+
+* execute separate top-level recursive computations concurrently;
+* transform recognised map-style recursion into concurrent_maplist;
+* generate a bounded concurrent operation for a known finite collection;
+* leave ordinary recursion sequential.
+
+33. Bounded concurrency
+
+Generated code must avoid unbounded thread creation.
+
+The converter must establish a maximum concurrent worker count.
+
+Possible configuration:
+
+:- piglog_max_threads(4).
+
+The default may use the SWI-Prolog cpu_count flag at conversion time.
+
+The selected number must then be emitted as a fixed value or ordinary generated expression that does not perform a Piglog profitability decision.
+
+Example generated code:
+
+concurrent(4, Goals, [])
+
+For input-sized list operations, standard SWI-Prolog concurrent map predicates may manage bounded workers directly.
+
+34. Converter reports
+
+Piglog 2 must provide a conversion report.
+
+For each candidate group, the report should show:
+
+* source predicate;
+* source location;
+* candidate sections;
+* dependency result;
+* estimated sequential runtime;
+* estimated concurrent runtime;
+* estimated overhead;
+* estimated saving;
+* selected action;
+* selected SWI-Prolog construct;
+* reason for leaving a section sequential where applicable.
+
+Example:
+
+Predicate: report/2
+Candidate sections:
+  1. analyse_text/2
+  2. analyse_numbers/2
+Estimated sequential time: 84 ms
+Estimated concurrent time: 49 ms
+Estimated saving: 35 ms
+Decision: concurrent
+Generated construct: specialised thread_create/thread_join wrapper
+
+Another example:
+
+Predicate: normalise/2
+Estimated sequential time: 0.08 ms
+Estimated concurrent time: 0.31 ms
+Decision: sequential
+Reason: estimated thread overhead exceeds expected saving
+
+35. Reporting commands
+
+Required commands:
+
+piglog_report(+Source).
+piglog_report(+Source, +Options).
+
+Possible options:
+
+[
+    show_candidates(true),
+    show_dependencies(true),
+    show_estimates(true),
+    show_rejections(true),
+    show_generated_sections(true)
+]
+
+The report may be combined with conversion:
+
+?- piglog(Source, output, [report(true)]).
+
+36. Code-output requirements
+
+Generated source must:
+
+* be valid SWI-Prolog;
+* be consistently formatted;
+* include required library imports;
+* contain no Piglog runtime profitability tests;
+* contain no unresolved internal analysis terms;
+* contain no dependency graph data unless diagnostic output is requested;
+* include generated helper predicates where required;
+* preserve source predicate names where practical;
+* use collision-resistant names for generated helpers;
+* include comments identifying converted regions;
+* remain readable enough for inspection and debugging.
+
+Example comment:
+
+% Piglog 2: converted independent sections from report/2.
+% Estimated sequential: 84 ms.
+% Estimated concurrent: 49 ms.
+
+Runtime estimates in comments are allowed because they do not affect execution.
+
+37. Generated-helper naming
+
+Generated helper predicates must use a reserved prefix such as:
+
+'$piglog2_worker_'
+'$piglog2_collect_'
+'$piglog2_region_'
+
+Helper names must include enough information to avoid collisions.
+
+Example:
+
+'$piglog2_worker_report_2_1'/2
+
+Generated internal predicates must not be exported unless explicitly requested.
+
+38. Source preservation
+
+The converter should preserve:
+
+* module declarations;
+* exported predicate declarations;
+* required imports;
+* operators;
+* comments where practical;
+* predicate order where practical;
+* source location information;
+* unchanged clauses;
+* declarations not specifically transformed.
+
+Unknown directives should be preserved unless doing so would be invalid in the generated module.
+
+39. Output destinations
+
+Piglog 2 must support:
+
+* printing converted code to the terminal;
+* returning converted clauses as Prolog terms;
+* writing converted code to a file;
+* loading converted code into a generated module;
+* outputting and loading in one command.
+
+Required conceptual interfaces:
+
+piglog_convert_terms(+Source, -Terms).
+piglog_write(+Source, +OutputFile).
+piglog_load(+Source, -Module).
+piglog_output_run(+Source, +Goal).
+
+40. Configuration
+
+Configuration may be supplied through:
+
+* converter options;
+* source directives;
+* a local configuration file;
+* REPL settings.
+
+Required configurable values include:
+
+minimum_concurrent_time
+minimum_expected_saving
+maximum_threads
+estimation_method
+benchmark_repetitions
+generated_module_prefix
+report_detail
+source_comments
+
+Configuration is used by the converter.
+
+It must not turn the generated program into a runtime Piglog scheduler.
+
+41. Suggested public API
+
+The first implementation should expose a clear API resembling:
+
+piglog_output(+Source).
+piglog_output(+Source, +Options).
+piglog_run(+Source, +Goal).
+piglog_run(+Source, +Goal, +Options).
+piglog_output_run(+Source, +Goal).
+piglog_output_run(+Source, +Goal, +Options).
+piglog_convert(+Source, -GeneratedTerms).
+piglog_convert(+Source, -GeneratedTerms, +Report).
+piglog_write(+Source, +OutputFile).
+piglog_write(+Source, +OutputFile, +Options).
+piglog_report(+Source).
+piglog_calibrate.
+
+Source may accept:
+
+file(Path)
+terms(Terms)
+module(Module)
+predicate(Module:Name/Arity)
+
+42. Conversion options
+
+Suggested options:
+
+[
+    action(output),
+    entry_goal(main),
+    output_file('generated.pl'),
+    estimate(measured),
+    benchmark_repetitions(5),
+    minimum_concurrent_time(milliseconds(10)),
+    minimum_expected_saving(milliseconds(2)),
+    maximum_threads(4),
+    report(summary),
+    comments(true)
+]
+
+43. Conversion decisions
+
+The converter must classify each region as one of:
+
+converted_concurrent
+retained_sequential_short
+retained_sequential_dependent
+retained_sequential_effectful
+retained_sequential_nondeterministic
+retained_sequential_thread_unsafe
+retained_sequential_unknown
+retained_sequential_unsupported
+
+These classifications should be available in the report.
+
+44. No semantic-equivalence verification
+
+Piglog 2 must not include a mandatory semantic-equivalence verification stage.
+
+It must not:
+
+* run the complete original and generated programs to compare answers;
+* invoke a theorem prover to establish equivalence;
+* prevent output because equivalence has not been proven;
+* describe the generated code as formally verified.
+
+Tests may compare selected source and generated examples during development, but this is repository testing rather than a required conversion stage.
+
+The converter should state:
+
+Piglog 2 applies dependency, cost, effect, and thread-safety analyses.
+It does not formally verify semantic equivalence.
+
+45. Diagnostics
+
+Diagnostics must identify:
+
+* source file;
+* predicate;
+* clause where possible;
+* candidate region;
+* decision;
+* reason;
+* relevant variables;
+* estimated cost;
+* selected concurrency construct.
+
+Example:
+
+PIGLOG2 INFO:
+  predicate: report/2
+  clause: 1
+  lines: 14-18
+  action: inserted concurrency
+  sections: analyse_text/2, analyse_numbers/2
+  estimated saving: 35 ms
+
+Example rejection:
+
+PIGLOG2 INFO:
+  predicate: save_report/2
+  action: retained sequential
+  reason: write_report/2 is classified as effectful
+
+Diagnostics should not use alarming language for ordinary sequential decisions.
+
+Most code will legitimately remain sequential.
+
+46. Error handling
+
+Conversion errors must distinguish between:
+
+* malformed Prolog source;
+* unavailable source file;
+* invalid Piglog directive;
+* failed benchmark;
+* generated-module load failure;
+* worker execution failure;
+* unsupported output destination;
+* internal converter error.
+
+An unsuccessful runtime estimate should normally cause the affected region to remain sequential rather than aborting the entire conversion.
+
+47. Benchmark safety
+
+Converter-time benchmarking must not automatically execute predicates known or suspected to:
+
+* perform irreversible effects;
+* write files;
+* modify a database;
+* control hardware;
+* send network requests;
+* prompt for user input;
+* loop indefinitely;
+* depend on unavailable external state.
+
+Such predicates require:
+
+* a user-supplied cost declaration;
+* a safe benchmark wrapper;
+* or a static estimate.
+
+48. Estimation cache
+
+Piglog 2 should maintain an optional estimation cache.
+
+A cache entry may contain:
+
+piglog_measurement(
+    PredicateIndicator,
+    InputShape,
+    Runtime,
+    Timestamp,
+    Environment
+).
+
+The cache should be invalidated or ignored when:
+
+* the predicate source changes;
+* relevant options change;
+* the user requests recalibration;
+* the measurement is incompatible with the current environment.
+
+The cache is a converter feature.
+
+It must not be loaded as part of the generated program unless explicitly requested for diagnostics.
+
+49. Example complete conversion
+
+49.1 Source
+
+:- module(example, [report/2]).
+report(Input, Report) :-
+    analyse_words(Input, Words),
+    analyse_numbers(Input, Numbers),
+    combine(Words, Numbers, Report).
+analyse_words(Input, Words) :-
+    expensive_word_processing(Input, Words).
+analyse_numbers(Input, Numbers) :-
+    expensive_number_processing(Input, Numbers).
+
+49.2 Converter analysis
+
+analyse_words/2:
+    estimated runtime: 42 ms
+analyse_numbers/2:
+    estimated runtime: 37 ms
+sequential estimate:
+    79 ms
+concurrent estimate:
+    46 ms
+estimated saving:
+    33 ms
+
+49.3 Generated structure
+
+The generated program should directly create and join the required workers or use an equivalent direct SWI-Prolog construct.
+
+It must not generate:
+
+piglog_schedule([
+    analyse_words(Input, Words),
+    analyse_numbers(Input, Numbers)
+]).
+
+It must not generate:
+
+(   piglog_profitable_now(...)
+->  run_parallel(...)
+;   run_sequential(...)
+).
+
+It should generate fixed concurrent code selected during conversion.
+
+50. Testing requirements
+
+The repository must include automated tests for:
+
+50.1 Basic conversion
+
+* two independent long deterministic predicates;
+* three independent long deterministic predicates;
+* dependent predicates retained sequentially;
+* short independent predicates retained sequentially;
+* mixed long and short sections;
+* independent chains grouped into long worker sections.
+
+50.2 Variables
+
+* shared instantiated input;
+* separate outputs;
+* output required by continuation;
+* overlapping output variable rejection;
+* partially instantiated structures;
+* unavailable input dependency.
+
+50.3 Control flow
+
+* if-then-else;
+* cuts as boundaries;
+* disjunction retained sequentially;
+* semideterministic failure;
+* worker exception;
+* recursive predicates;
+* maplist conversion.
+
+50.4 Effects
+
+* output predicates;
+* dynamic database updates;
+* file operations;
+* explicitly declared thread-safe predicates;
+* explicitly declared thread-unsafe predicates.
+
+50.5 REPL commands
+
+* output only;
+* run only;
+* output and run;
+* file input;
+* term input;
+* generated-module loading;
+* repeated conversion;
+* report output.
+
+50.6 Runtime estimation
+
+* measured estimate;
+* static estimate;
+* declared estimate;
+* failed benchmark fallback;
+* calibration;
+* threshold configuration;
+* estimate cache invalidation.
+
+50.7 Generated code
+
+Tests must confirm that generated code:
+
+* loads in SWI-Prolog;
+* uses direct concurrency constructs;
+* does not call a Piglog scheduler;
+* does not contain runtime profitability heuristics;
+* includes required imports;
+* cleans up worker threads and queues;
+* propagates worker failure and exceptions.
+
+51. Performance tests
+
+Performance tests must compare:
+
+* original sequential execution time;
+* generated concurrent execution time;
+* conversion-time estimate;
+* measured concurrency overhead.
+
+Benchmarks should include:
+
+* workloads too short to parallelise;
+* workloads just below the threshold;
+* workloads just above the threshold;
+* balanced long workers;
+* unbalanced long workers;
+* two-worker groups;
+* groups larger than the processor count;
+* concurrent map operations.
+
+A performance test failure must not be concealed by changing correctness expectations.
+
+52. Documentation requirements
+
+The repository must include:
+
+README.md
+PROGRAM_REQUIREMENTS.md
+ARCHITECTURE.md
+REPL.md
+ESTIMATION.md
+CONCURRENCY_TRANSFORMS.md
+LIMITATIONS.md
+TESTING.md
+PROGRESS.md
+
+52.1 README
+
+The README must explain:
+
+* what Piglog 2 is;
+* that it replaces Piglog;
+* that it inserts concurrent constructs;
+* that runtime is estimated during conversion;
+* that generated code contains no Piglog scheduler;
+* that semantic equivalence is not formally verified;
+* how to install and run it;
+* basic REPL examples.
+
+52.2 ESTIMATION.md
+
+This file must document:
+
+* measured estimation;
+* static estimation;
+* user cost declarations;
+* calibration;
+* thresholds;
+* estimation limitations.
+
+52.3 CONCURRENCY_TRANSFORMS.md
+
+This file must show:
+
+* source and generated examples;
+* direct concurrent/3 conversion;
+* output-producing worker conversion;
+* concurrent_maplist conversion;
+* failure and exception handling;
+* reasons for retaining sequential execution.
+
+53. GitHub Copilot Agent workflow
+
+The GitHub Copilot Agent must implement Piglog 2 in stages.
+
+Each stage must include:
+
+1. implementation;
+2. unit tests;
+3. integration tests where applicable;
+4. documentation updates;
+5. self-review;
+6. execution of the complete existing test suite;
+7. correction of failures before advancing;
+8. update of PROGRESS.md.
+
+The agent must not weaken or remove tests merely to make the suite pass.
+
+54. Implementation stages
+
+Stage 1: Repository foundation
+
+Implement:
+
+* SWI-Prolog module structure;
+* source reader;
+* term representation;
+* basic command API;
+* test harness;
+* initial documentation.
+
+Stage 2: Clause-body analysis
+
+Implement:
+
+* conjunction flattening;
+* executable-section representation;
+* variable input/output analysis;
+* basic dependency graph;
+* sequential-region reconstruction.
+
+Stage 3: Safety classification
+
+Implement:
+
+* determinism declarations;
+* effect classification;
+* thread-safety declarations;
+* cut boundaries;
+* unsupported-region fallback.
+
+Stage 4: Runtime estimator
+
+Implement:
+
+* cost declarations;
+* static fallback estimates;
+* safe measured benchmarking;
+* threshold comparison;
+* estimation reports.
+
+Stage 5: Direct concurrency transformation
+
+Implement:
+
+* direct concurrent/3 output for suitable no-result-sharing groups;
+* required imports;
+* generated comments;
+* sequential fallback.
+
+Stage 6: Output-producing workers
+
+Implement:
+
+* generated worker predicates;
+* result transport;
+* thread creation;
+* thread joining;
+* queue cleanup;
+* failure propagation;
+* exception propagation.
+
+Stage 7: Long-section grouping
+
+Implement:
+
+* dependent call-chain grouping;
+* cost aggregation;
+* concurrency between independent chains;
+* generated worker extraction.
+
+Stage 8: Concurrent map support
+
+Implement:
+
+* recognised maplist patterns;
+* conversion to concurrent map predicates;
+* runtime threshold application;
+* tests for map outputs and failures.
+
+Stage 9: REPL completion
+
+Implement:
+
+* output;
+* run;
+* output and run;
+* interactive term capture;
+* file conversion;
+* generated-module management.
+
+Stage 10: Calibration and caching
+
+Implement:
+
+* local concurrency-overhead calibration;
+* estimation cache;
+* invalidation rules;
+* configuration persistence.
+
+Stage 11: Diagnostics and documentation
+
+Complete:
+
+* detailed conversion reports;
+* source-location reporting;
+* all required documentation;
+* examples;
+* limitations.
+
+Stage 12: Final validation
+
+Run:
+
+* all unit tests;
+* all integration tests;
+* concurrency cleanup tests;
+* generated-source loading tests;
+* performance benchmarks;
+* REPL examples from documentation.
+
+55. Acceptance criteria
+
+Piglog 2 is complete for its first release when:
+
+1. it loads inside SWI-Prolog;
+2. it accepts ordinary Prolog source from terms or files;
+3. it identifies independent executable sections;
+4. it estimates their runtime during conversion;
+5. it leaves short sections sequential;
+6. it inserts direct SWI-Prolog concurrency constructs into suitable long sections;
+7. it can transport results from concurrent workers;
+8. it does not insert a Piglog runtime scheduler;
+9. generated code contains no runtime profitability heuristics;
+10. it provides output, run, and output-and-run REPL commands;
+11. generated code loads and runs in SWI-Prolog;
+12. worker failures and exceptions are handled;
+13. resources are cleaned up;
+14. conversion reports explain the decisions;
+15. semantic-equivalence verification is not required;
+16. all repository tests pass;
+17. all required documentation is present.
+
+56. Required summary statement
+
+The repository should use the following summary or a close equivalent:
+
+Piglog 2 replaces Piglog. It is an in-SWI-Prolog source converter and runner that estimates the runtime of independent program sections during conversion and inserts direct concurrent constructs where sections are long enough and concurrency is appropriate. It can output, run, or output and run generated Piglog code. Generated code contains fixed concurrency decisions rather than Piglog runtime scheduling or profitability heuristics. Piglog 2 does not formally verify semantic equivalence.
+
+57. Guiding principle
+
+The main design rule is:
+
+Estimate during conversion; insert concurrency directly; keep generated execution simple.
+
+Piglog 2 should produce ordinary, inspectable SWI-Prolog code in which worthwhile concurrency has already been selected and inserted.
+
+The key implementation distinction is that generated helper predicates may perform the mechanical work of creating, joining, and collecting results from threads, but they must not decide whether concurrency is appropriate. That decision belongs exclusively to the converter.
