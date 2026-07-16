@@ -53,7 +53,7 @@ test(piglog_report_runs) :-
 %% ─── File operations ─────────────────────────────────────────────────────────
 
 test(piglog_output_file) :-
-    absolute_file_name('examples/example.pl', ExFile, [file_type(prolog), access(exist)]),
+    absolute_file_name('../examples/example.pl', ExFile, [file_type(prolog), access(exist)]),
     with_output_to(string(Output),
         piglog_output_file(ExFile)),
     Output \= ''.

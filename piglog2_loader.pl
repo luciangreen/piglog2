@@ -9,7 +9,8 @@
     load_generated_terms/4,
     unload_generated_module/1,
     make_module_name/3,
-    loaded_module/2
+    loaded_module/2,
+    preload_terms_for_timing/3
 ]).
 
 :- use_module(piglog2_config).
@@ -122,3 +123,55 @@ run_goal_in_module(ModuleName, Goal) :-
     ;
         throw(piglog2_error(module_not_loaded, ModuleName))
     ).
+
+%% ─── Source pre-loading for automatic timing ─────────────────────────────────
+
+%% preload_terms_for_timing(+Terms, +Options, -TempModule)
+%%
+%% Load source terms into a fresh temporary module so the estimator can
+%% benchmark them.  The caller is responsible for cleanup via
+%% unload_generated_module/1.  If loading fails for any reason the predicate
+%% still succeeds, returning the module name; the module simply has no
+%% predicates loaded, so benchmarking will fall back to static estimates.
+
+preload_terms_for_timing(Terms, _Options, TempModule) :-
+    gensym(piglog2_timing_, TempModule),
+    exclude(is_source_module_decl, Terms, FilteredTerms),
+    tmp_file_name(TempModule, TmpFile),
+    assertz(loaded_module(TempModule, TmpFile)),
+    (catch(
+        (   setup_call_cleanup(
+                open(TmpFile, write, Stream),
+                write_timing_file(Stream, TempModule, FilteredTerms),
+                close(Stream)
+            ),
+            load_files(TmpFile, [silent(true)])
+        ),
+        _Error,
+        true   %% load failure is acceptable - just no timing data
+    ) -> true ; true).
+
+%% is_source_module_decl(+Term)
+%% True if Term is a module/2 or module/3 declaration from the source file.
+
+is_source_module_decl((:- module(_, _))).
+is_source_module_decl((:- module(_, _, _))).
+
+%% write_timing_file(+Stream, +ModName, +Terms)
+%% Write a loadable Prolog file wrapping Terms in a fresh module.
+
+write_timing_file(Stream, ModName, Terms) :-
+    format(Stream, ":- module(~w, []).~n~n", [ModName]),
+    format(Stream, ":- use_module(library(thread)).~n", []),
+    format(Stream, ":- use_module(library(apply)).~n~n", []),
+    maplist(write_timing_term(Stream), Terms).
+
+%% write_timing_term(+Stream, +Term)
+%% Write a single term with numbered variables so it is loadable.
+
+write_timing_term(Stream, Term) :-
+    copy_term(Term, Copy),
+    numbervars(Copy, 0, _),
+    write_term(Stream, Copy, [quoted(true), numbervars(true)]),
+    write(Stream, '.'),
+    nl(Stream).

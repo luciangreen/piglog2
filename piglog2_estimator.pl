@@ -51,6 +51,9 @@ get_concurrency_overhead(OverheadMs) :-
 
 %% estimate_goal_cost(+Goal, +Options, -CostMs)
 %% Estimate the cost (in milliseconds) of executing Goal.
+%%
+%% When Options contains timing_module(Mod), benchmarking calls Mod:Goal so
+%% that predicates pre-loaded for auto-timing are exercised directly.
 
 estimate_goal_cost(Goal, Options, CostMs) :-
     callable(Goal),
@@ -64,13 +67,35 @@ estimate_goal_cost(Goal, Options, CostMs) :-
     ;
         option_estimate_method(Options, measured),
         goal_is_safe_to_benchmark(Goal) ->
-        (measure_goal_safe(Goal, Options, Measured) ->
-            CostMs = Measured
-        ;
-            static_estimate(Goal, Options, CostMs)
-        )
+        benchmark_goal(Goal, Options, CostMs)
     ;
         static_estimate(Goal, Options, CostMs)
+    ).
+
+%% benchmark_goal(+Goal, +Options, -CostMs)
+%% Run Goal for timing, optionally in the pre-loaded timing module.
+%% Falls back to static_estimate if benchmarking fails.
+
+benchmark_goal(Goal, Options, CostMs) :-
+    (option_timing_module(Options, TempModule), TempModule \= none ->
+        BenchGoal = TempModule:Goal
+    ;
+        BenchGoal = Goal
+    ),
+    (measure_goal_safe(BenchGoal, Options, Measured) ->
+        CostMs = Measured
+    ;
+        static_estimate(Goal, Options, CostMs)
+    ).
+
+%% option_timing_module(+Options, -Module)
+%% Extract the timing_module from Options, or 'none' if not present.
+
+option_timing_module(Options, Module) :-
+    (member(timing_module(Module), Options) ->
+        true
+    ;
+        Module = none
     ).
 
 %% estimate_section_cost(+Section, +Options, -CostMs)
@@ -129,9 +154,7 @@ goal_is_safe_to_benchmark(Goal) :-
     \+ goal_is_recursive_unknown(Goal).
 
 goal_introduces_io(Goal) :-
-    callable(Goal),
-    functor(Goal, Name, Arity),
-    known_effectful(Name/Arity).
+    goal_has_side_effect(Goal).
 
 goal_is_recursive_unknown(_) :- fail.  % conservative; extend as needed
 
