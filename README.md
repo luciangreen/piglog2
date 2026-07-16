@@ -114,22 +114,6 @@ report(Source, Report) :-
 
 ---
 
-## Caveats
-
-* Insert statements like the following in algorithms to be converted, ensuring that the cost of predicates to make concurrent is > 10 ms and that the predicates are safe to make concurrent.
-
-```
-:- piglog_cost(word_score/2,milliseconds(40)).
-
-:- piglog_cost(number_score/2,milliseconds(35)).
-
-:- piglog_thread_safe(word_score/2).
-
-:- piglog_thread_safe(number_score/2).
-```
-
----
-
 ## Running Tests
 
 ```bash
