@@ -418,14 +418,19 @@ goal_part_thread_safe_in_module(G, Module, Visited) :-
 
 %% flatten_conjunction(+Body, -Goals)
 %% Re-exported here to avoid module-qualifier dependencies in body inspection.
+%% Uses a difference-list helper so that right-nested conjunctions
+%% (the common Prolog form) are processed via tail-call optimisation,
+%% avoiding stack overflow on large clause bodies.
 
-flatten_conjunction((A, B), Goals) :-
+flatten_conjunction(Body, Goals) :-
+    flatten_conj(Body, Goals, []).
+
+flatten_conj((A, B), Goals, Tail) :-
     !,
-    flatten_conjunction(A, GoalsA),
-    flatten_conjunction(B, GoalsB),
-    append(GoalsA, GoalsB, Goals).
-flatten_conjunction(true, []) :- !.
-flatten_conjunction(Goal, [Goal]).
+    flatten_conj(A, Goals, Mid),
+    flatten_conj(B, Mid, Tail).
+flatten_conj(true, Tail, Tail) :- !.
+flatten_conj(Goal, [Goal|Tail], Tail).
 
 %% classify_if_then_else(+(Cond -> Then ; Else), -Classification)
 %% If-then-else branches must not be run concurrently.
