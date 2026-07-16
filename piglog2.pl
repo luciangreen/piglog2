@@ -73,13 +73,36 @@
 
 do_convert(Source, Options, Generated, Helpers, Reports) :-
     read_source(Source, Terms),
-    transform_terms(Terms, Options,
+    (   should_auto_time(Options)
+    ->  format("Piglog 2: timing predicates for concurrent transformation~n"),
+        format("  (this may take a notification and several minutes)...~n"),
+        preload_terms_for_timing(Terms, Options, TempModule),
+        nb_setval(piglog2_timing_module, TempModule),
+        AllOptions = [timing_module(TempModule)|Options]
+    ;   nb_setval(piglog2_timing_module, none),
+        TempModule = none,
+        AllOptions = Options
+    ),
+    transform_terms(Terms, AllOptions,
                     transform_result(GenTerms, Helpers, Reports)),
+    nb_setval(piglog2_timing_module, none),
+    (   TempModule \= none
+    ->  catch(unload_generated_module(TempModule), _, true)
+    ;   true
+    ),
     (Helpers = [] ->
         Generated = GenTerms
     ;
         append(GenTerms, Helpers, Generated)
     ).
+
+%% should_auto_time(+Options)
+%% True when automatic timing (pre-loading + measured benchmarking) is enabled.
+
+should_auto_time(Options) :-
+    \+ member(auto_time(false), Options),
+    \+ member(estimation_method(static), Options),
+    piglog2_config(estimation_method, measured).
 
 %% ─── piglog_output/1,2 ───────────────────────────────────────────────────────
 

@@ -17,7 +17,7 @@
 piglog2_default_config(minimum_concurrent_time,   milliseconds(10)).
 piglog2_default_config(minimum_expected_saving,   milliseconds(2)).
 piglog2_default_config(maximum_threads,           4).
-piglog2_default_config(estimation_method,         static).
+piglog2_default_config(estimation_method,         measured).
 piglog2_default_config(benchmark_repetitions,     5).
 piglog2_default_config(generated_module_prefix,   piglog2_generated).
 piglog2_default_config(report_detail,             summary).

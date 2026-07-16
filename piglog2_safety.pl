@@ -24,6 +24,7 @@
     piglog_deterministic/1,
     piglog_cost/2,
     piglog_long/1,
+    infer_thread_safe_in_module/3,
     %% Dynamic user declaration facts (exported for other modules)
     piglog_user_thread_safe/1,
     piglog_user_thread_unsafe/1,
@@ -334,17 +335,97 @@ goal_is_deterministic(Goal) :-
     (known_deterministic(Indicator) ; piglog_user_deterministic(Indicator)).
 
 %% goal_is_safe_for_concurrency(+Goal)
-%% A goal is safe for concurrency if it is thread-safe and not a cut.
+%% A goal is safe for concurrency if it has no side effects and, when a
+%% timing module is active, passes recursive clause-body inspection.
 
 goal_is_safe_for_concurrency(Goal) :-
     Goal \== (!),
-    \+ goal_has_side_effect(Goal).
+    \+ goal_has_side_effect(Goal),
+    (   catch(nb_getval(piglog2_timing_module, Mod), _, Mod = none),
+        Mod \= none,
+        callable(Goal),
+        functor(Goal, Name, Arity)
+    ->  infer_thread_safe_in_module(Name/Arity, Mod, [])
+    ;   true   %% No module context - current conservative behaviour (assume safe)
+    ).
 
 %% section_safe_for_concurrency(+Section)
 %% A section is safe if all its goals are safe and it has no cut boundary.
 
 section_safe_for_concurrency(section(Goals, _, _, meta(_, false))) :-
     maplist(goal_is_safe_for_concurrency, Goals).
+
+%% ─── Recursive thread-safety inference ───────────────────────────────────────
+
+%% infer_thread_safe_in_module(+Indicator, +Module, +Visited)
+%%
+%% Infer whether the predicate Indicator is thread-safe by inspecting its
+%% clauses inside Module.  Visited prevents infinite recursion on mutually
+%% recursive predicates (treated conservatively as safe).
+%%
+%% Priority:
+%%   1. Explicitly declared unsafe   → fail
+%%   2. Explicitly declared safe     → succeed
+%%   3. Already in Visited           → succeed  (recursion guard)
+%%   4. Has user-defined clauses in Module → inspect body recursively
+%%   5. Otherwise                    → succeed  (assume safe / unknown)
+
+infer_thread_safe_in_module(Indicator, _Module, _Visited) :-
+    (known_thread_unsafe(Indicator) ; piglog_user_thread_unsafe(Indicator)),
+    !,
+    fail.
+infer_thread_safe_in_module(Indicator, _Module, _Visited) :-
+    (known_thread_safe(Indicator) ; piglog_user_thread_safe(Indicator)),
+    !.
+infer_thread_safe_in_module(_Indicator, _Module, Visited) :-
+    length(Visited, L), L > 20,   %% hard depth limit to prevent runaway
+    !.
+infer_thread_safe_in_module(Indicator, _Module, Visited) :-
+    member(Indicator, Visited),
+    !.   %% Recursive call - assume safe to avoid infinite loop
+infer_thread_safe_in_module(Indicator, Module, Visited) :-
+    Indicator = Name/Arity,
+    functor(Head, Name, Arity),
+    (   catch(predicate_property(Module:Head, defined), _, fail),
+        \+ catch(predicate_property(Module:Head, built_in), _, false),
+        \+ catch(predicate_property(Module:Head, imported_from(_)), _, false)
+    ->  %% User-defined predicate in Module: inspect all clauses
+        forall(
+            clause(Module:Head, Body),
+            body_thread_safe_in_module(Body, Module, [Indicator|Visited])
+        )
+    ;   true   %% Unknown, built-in, or imported - assume safe
+    ).
+
+%% body_thread_safe_in_module(+Body, +Module, +Visited)
+
+body_thread_safe_in_module(Body, Module, Visited) :-
+    flatten_conjunction(Body, Goals),
+    forall(
+        member(G, Goals),
+        goal_part_thread_safe_in_module(G, Module, Visited)
+    ).
+
+%% goal_part_thread_safe_in_module(+Goal, +Module, +Visited)
+
+goal_part_thread_safe_in_module(G, Module, Visited) :-
+    (callable(G) ->
+        functor(G, GN, GA),
+        infer_thread_safe_in_module(GN/GA, Module, Visited)
+    ;
+        true   %% Non-callable (variable etc.) - assume safe
+    ).
+
+%% flatten_conjunction(+Body, -Goals)
+%% Re-exported here to avoid module-qualifier dependencies in body inspection.
+
+flatten_conjunction((A, B), Goals) :-
+    !,
+    flatten_conjunction(A, GoalsA),
+    flatten_conjunction(B, GoalsB),
+    append(GoalsA, GoalsB, Goals).
+flatten_conjunction(true, []) :- !.
+flatten_conjunction(Goal, [Goal]).
 
 %% classify_if_then_else(+(Cond -> Then ; Else), -Classification)
 %% If-then-else branches must not be run concurrently.
