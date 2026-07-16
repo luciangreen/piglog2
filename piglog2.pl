@@ -183,7 +183,9 @@ piglog_write(Source, OutputFile, Options) :-
     format("Piglog 2: written to ~w~n", [OutputFile]).
 
 write_clause_to_stream(Stream, Term) :-
-    write_term(Stream, Term, [quoted(true), numbervars(true)]),
+    copy_term(Term, Copy),
+    numbervars(Copy, 0, _),
+    write_term(Stream, Copy, [quoted(true), numbervars(true)]),
     write(Stream, '.'),
     nl(Stream).
 

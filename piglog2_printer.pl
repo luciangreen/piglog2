@@ -57,16 +57,22 @@ print_piglog_term((:- Directive), _Options) :-
     format(":- ~w.~n", [Directive]).
 print_piglog_term((Head :- Body), Options) :-
     !,
+    copy_term((Head :- Body), (Head1 :- Body1)),
+    numbervars((Head1 :- Body1), 0, _),
     (option_source_comments(Options) -> true ; true),
-    format("~w :-~n", [Head]),
-    print_body(Body, 4),
+    format("~w :-~n", [Head1]),
+    print_body(Body1, 4),
     format(".~n").
 print_piglog_term(Fact, _Options) :-
     callable(Fact),
     !,
-    format("~w.~n", [Fact]).
+    copy_term(Fact, Fact1),
+    numbervars(Fact1, 0, _),
+    format("~w.~n", [Fact1]).
 print_piglog_term(Term, _Options) :-
-    format("~w.~n", [Term]).
+    copy_term(Term, Term1),
+    numbervars(Term1, 0, _),
+    format("~w.~n", [Term1]).
 
 option_source_comments(Options) :-
     (member(comments(true), Options) -> true ;
