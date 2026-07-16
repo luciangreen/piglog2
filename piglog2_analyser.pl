@@ -45,14 +45,19 @@ analyse_body(Body, HeadVars, Sections) :-
 %% flatten_conjunction(+Body, -Goals)
 %%
 %% Flatten (A, B) into a list, preserving structure of other goals.
+%% Uses a difference-list helper so that right-nested conjunctions
+%% (the common Prolog form) are processed via tail-call optimisation,
+%% avoiding stack overflow on large clause bodies.
 
-flatten_conjunction((A, B), Goals) :-
+flatten_conjunction(Body, Goals) :-
+    flatten_conj(Body, Goals, []).
+
+flatten_conj((A, B), Goals, Tail) :-
     !,
-    flatten_conjunction(A, GoalsA),
-    flatten_conjunction(B, GoalsB),
-    append(GoalsA, GoalsB, Goals).
-flatten_conjunction(true, []) :- !.
-flatten_conjunction(Goal, [Goal]).
+    flatten_conj(A, Goals, Mid),
+    flatten_conj(B, Mid, Tail).
+flatten_conj(true, Tail, Tail) :- !.
+flatten_conj(Goal, [Goal|Tail], Tail).
 
 %% build_sections(+Goals, +AvailableVars, -Sections)
 %%
