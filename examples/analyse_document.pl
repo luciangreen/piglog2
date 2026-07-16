@@ -4,14 +4,6 @@
     number_score/2
 ]).
 
-% Tell Piglog 2 that these operations are sufficiently expensive.
-:- piglog_cost(word_score/2, milliseconds(40)).
-:- piglog_cost(number_score/2, milliseconds(35)).
-
-% Confirm that they may safely execute in separate threads.
-:- piglog_thread_safe(word_score/2).
-:- piglog_thread_safe(number_score/2).
-
 % The two analyses depend only on Document.
 % Neither analysis requires the other one's result.
 analyse_document(Document, analysis(Words, Numbers)) :-

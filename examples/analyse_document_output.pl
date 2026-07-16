@@ -11,14 +11,6 @@
 
 :- module(concurrent_example,[analyse_document/2,word_score/2,number_score/2]).
 
-:- piglog_cost(word_score/2,milliseconds(40)).
-
-:- piglog_cost(number_score/2,milliseconds(35)).
-
-:- piglog_thread_safe(word_score/2).
-
-:- piglog_thread_safe(number_score/2).
-
 analyse_document(A,analysis(B,C)) :-
     concurrent(2,
         [
@@ -48,3 +40,4 @@ cpu_work_(A,B,C) :-
     D is (B+A)mod 1000003,
     E is A-1,
     cpu_work_(E,D,C).
+
