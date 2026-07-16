@@ -257,7 +257,8 @@ builtin_cost_class(close/1,   io).
 builtin_cost_class(assert/1,  medium).
 builtin_cost_class(assertz/1, medium).
 builtin_cost_class(asserta/1, medium).
-builtin_cost_class(retract/1, medium).
+builtin_cost_class(retract/1,    medium).
+builtin_cost_class(retractall/1, medium).
 
 cost_class_ms(trivial, 0.001).
 cost_class_ms(light,   0.1).
@@ -270,7 +271,7 @@ cost_class_ms(unknown, 1.0).
 
 clause_body_cost(Name, Arity, CostMs) :-
     functor(Head, Name, Arity),
-    (clause(Head, Body) ->
+    (catch(clause(Head, Body), _, fail) ->
         count_body_calls(Body, N),
         CostMs is N * 0.5
     ;
