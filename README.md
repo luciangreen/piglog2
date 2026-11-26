@@ -169,3 +169,25 @@ See [LIMITATIONS.md](LIMITATIONS.md) for the complete list.
 ## License
 
 See repository licence.
+
+## Modes and side effects
+
+Piglog 2 does not assume that a clause's arguments are bound when it is
+called. If two goals it would run concurrently share a head variable, the
+generated clause runs them concurrently only when that variable is bound,
+and in their original order otherwise:
+
+```prolog
+chain(A, B) :-
+    (   ground([A])
+    ->  concurrent(2, [slow_a(A), slow_c(A, B)], [])
+    ;   slow_a(A), slow_c(A, B)
+    ).
+```
+
+Declare a mode to say an argument is always bound, and the guard is left
+out: `:- piglog_mode(chain(+, -)).`
+
+Goals are never grouped across a goal with a side effect (such as
+`writeln/1`), so output keeps its place and still happens only if the goals
+before it succeed.
