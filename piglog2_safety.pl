@@ -24,6 +24,9 @@
     piglog_deterministic/1,
     piglog_cost/2,
     piglog_long/1,
+    piglog_mode/1,
+    declare_mode/1,
+    piglog_user_mode/2,
     infer_thread_safe_in_module/3,
     %% Dynamic user declaration facts (exported for other modules)
     piglog_user_thread_safe/1,
@@ -40,6 +43,16 @@
 :- dynamic piglog_user_deterministic/1.
 :- dynamic piglog_user_cost/2.
 :- dynamic piglog_user_long/1.
+:- dynamic piglog_user_mode/2.
+
+%% declare_mode(+Spec), e.g. declare_mode(chain(+, -)): which arguments of a
+%% predicate are bound when it is called (+), used by the transformer to
+%% decide whether goals sharing a head variable may run concurrently.
+declare_mode(Spec) :-
+    functor(Spec, Name, Arity),
+    Spec =.. [_|Modes],
+    retractall(piglog_user_mode(Name/Arity, _)),
+    assertz(piglog_user_mode(Name/Arity, Modes)).
 
 declare_thread_safe(Indicator)  :- retractall(piglog_user_thread_safe(Indicator)),  assertz(piglog_user_thread_safe(Indicator)).
 declare_thread_unsafe(Indicator):- retractall(piglog_user_thread_unsafe(Indicator)),assertz(piglog_user_thread_unsafe(Indicator)).
@@ -53,6 +66,7 @@ piglog_thread_unsafe(I)  :- declare_thread_unsafe(I).
 piglog_deterministic(I)  :- declare_deterministic(I).
 piglog_cost(I, C)        :- declare_cost(I, C).
 piglog_long(I)           :- declare_long(I).
+piglog_mode(Spec)        :- declare_mode(Spec).
 
 %% ─── Known built-in safety database ─────────────────────────────────────────
 

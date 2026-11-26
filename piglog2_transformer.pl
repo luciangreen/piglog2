@@ -23,6 +23,18 @@
 %% ─── Counter for unique names ─────────────────────────────────────────────────
 
 :- dynamic piglog2_name_counter/1.
+
+%% A head variable is taken to be bound when the clause is called only if a
+%% mode declaration says so, e.g. :- piglog_mode(chain(+, -)) (see
+%% piglog2_safety:declare_mode/1).
+input_head_vars(Head, Vars) :-
+    functor(Head, Name, Arity),
+    (   piglog2_safety:piglog_user_mode(Name/Arity, Modes)
+    ->  Head =.. [_|Args],
+        % No findall here: it would copy the clause's variables.
+        input_arg_vars(Args, Modes, Vars)
+    ;   Vars = []
+    ).
 piglog2_name_counter(0).
 
 next_counter(N) :-
@@ -62,6 +74,8 @@ handle_source_directive(piglog_thread_unsafe(Indicator)) :-
     !, declare_thread_unsafe(Indicator).
 handle_source_directive(piglog_deterministic(Indicator)) :-
     !, declare_deterministic(Indicator).
+handle_source_directive(piglog_mode(Spec)) :-
+    !, piglog2_safety:declare_mode(Spec).
 handle_source_directive(piglog_minimum_concurrent_time(T)) :-
     !, piglog2_set_config(minimum_concurrent_time, T).
 handle_source_directive(piglog_max_threads(N)) :-
@@ -145,6 +159,7 @@ section_pair_independent(Si, Sj, AllSections, I, J) :-
     Si = section(_, _, _, meta(_, false)),
     Sj = section(_, _, _, meta(_, false)),
     \+ any_cut_between(AllSections, I, J),
+    \+ any_effect_between(AllSections, I, J),
     \+ section_transitively_depends(AllSections, J, I),
     \+ section_transitively_depends(AllSections, I, J).
 
@@ -169,6 +184,53 @@ section_trans_dep_(Sections, DepIdx, BaseIdx, Visited) :-
     nth0(Mid, Sections, section(_, _, Outputs_mid, _)),
     vars_overlap(Outputs_mid, Inputs_dep),
     section_trans_dep_(Sections, Mid, BaseIdx, [DepIdx|Visited]).
+
+%% A goal with a side effect between two sections would run after both once
+%% they are grouped, changing when (and whether) the effect happens.
+any_effect_between(Sections, I, J) :-
+    I < J,
+    I1 is I + 1,
+    J1 is J - 1,
+    I1 =< J1,
+    between(I1, J1, K),
+    nth0(K, Sections, section(Goals, _, _, _)),
+    member(G, Goals),
+    piglog2_safety:goal_has_side_effect(G),
+    !.
+
+input_arg_vars([], _, []).
+input_arg_vars([A|As], Modes, Vars) :-
+    ( Modes = [M|Ms] -> true ; M = (?), Ms = [] ),
+    input_arg_vars(As, Ms, Rest),
+    (   M == (+)
+    ->  term_variables(A, Vs), append(Vs, Rest, Vars)
+    ;   Vars = Rest
+    ).
+
+%% Head variables, not declared as inputs (+), that appear in at least two
+%% of the grouped sections.
+unmoded_shared_head_vars(GSections, Head, Shared) :-
+    term_variables(Head, HeadVars),
+    input_head_vars(Head, Inputs),
+    % maplist, not findall, so the variables stay the clause's own.
+    maplist(section_vars, GSections, VarLists),
+    unmoded_shared_(HeadVars, Inputs, VarLists, Shared).
+
+section_vars(section(G, _, _, _), Vs) :- term_variables(G, Vs).
+
+lists_containing([], _, 0).
+lists_containing([L|Ls], V, N) :-
+    lists_containing(Ls, V, N0),
+    ( var_member(V, L) -> N is N0 + 1 ; N = N0 ).
+
+unmoded_shared_([], _, _, []).
+unmoded_shared_([V|Vs], Inputs, VarLists, Shared) :-
+    (   \+ var_member(V, Inputs),
+        lists_containing(VarLists, V, N), N >= 2
+    ->  Shared = [V|Rest]
+    ;   Shared = Rest
+    ),
+    unmoded_shared_(Vs, Inputs, VarLists, Rest).
 
 any_cut_between(Sections, I, J) :-
     I < J,
@@ -300,9 +362,20 @@ apply_transformation(Indices, AllSections, Options, Head,
     %% Section independence already ensures no shared OUTPUT variables between goals.
     %% Input variables and output-to-continuation variables work correctly.
     maplist(section_to_goal, GSections, Goals),
-    ConcGoal = concurrent(ThreadCount, Goals, []),
+    ConcGoal0 = concurrent(ThreadCount, Goals, []),
+    %% Head variables that two grouped goals share are bound at call time
+    %% only if a mode declaration says so. Otherwise the concurrent form is
+    %% used only when they are bound, and the original order otherwise, so a
+    %% goal that binds one still runs before the goal that reads it.
+    unmoded_shared_head_vars(GSections, Head, Shared),
+    (   Shared == []
+    ->  ConcGoal = ConcGoal0,
+        ConstructType = concurrent3
+    ;   goals_to_conjunction(Goals, SeqGoal),
+        ConcGoal = (ground(Shared) -> ConcGoal0 ; SeqGoal),
+        ConstructType = concurrent3_when_ground(Shared)
+    ),
     Helpers = [],
-    ConstructType = concurrent3,
     %% Rebuild body replacing grouped sections with ConcGoal
     rebuild_body_sequential(AllSections, Indices, ConcGoal, NewBody),
     %% Build report

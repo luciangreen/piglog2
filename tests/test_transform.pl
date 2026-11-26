@@ -13,6 +13,7 @@ setup_long_predicates :-
     declare_long(worker_c/2), declare_thread_safe(worker_c/2).
 
 teardown_declarations :-
+    retractall(piglog_user_mode(_, _)),
     retractall(piglog_user_long(_)),
     retractall(piglog_user_thread_safe(_)),
     retractall(piglog_user_cost(_, _)).
@@ -21,6 +22,7 @@ teardown_declarations :-
 
 test(two_independent_produces_concurrent,
      [setup(setup_long_predicates), cleanup(teardown_declarations)]) :-
+    declare_mode(p(+, ?, ?)),
     Clause = (p(X, A, B) :- worker_a(X, A), worker_b(X, B)),
     transform_clause(Clause, [], Generated, _Helpers, Report),
     Generated = (p(_, _, _) :- concurrent(_, [worker_a(_, _), worker_b(_, _)], [])),
@@ -28,6 +30,7 @@ test(two_independent_produces_concurrent,
 
 test(sequential_continuation_preserved,
      [setup(setup_long_predicates), cleanup(teardown_declarations)]) :-
+    declare_mode(p(+, ?)),
     Clause = (p(X, R) :- worker_a(X, A), worker_b(X, B), combine(A, B, R)),
     transform_clause(Clause, [], Generated, _Helpers, _Report),
     Generated = (p(_, _) :- concurrent(_, _, []), combine(_, _, _)).
@@ -92,5 +95,40 @@ term_contains_scheduler((A ; B)) :-
     (term_contains_scheduler(A) ; term_contains_scheduler(B)).
 term_contains_scheduler((_ -> A ; B)) :-
     (term_contains_scheduler(A) ; term_contains_scheduler(B)).
+
+%% ─── Head variables and side effects ─────────────────────────────────────────
+
+test(shared_head_var_without_mode_is_guarded,
+     [setup(setup_long_predicates), cleanup(teardown_declarations)]) :-
+    retractall(piglog_user_mode(_, _)),
+    Clause = (p(X, A, B) :- worker_a(X, A), worker_b(X, B)),
+    transform_clause(Clause, [], Generated, _Helpers, _Report),
+    Generated = (p(X1, _, _) :- (ground(Vs) -> concurrent(_, [worker_a(_, _), worker_b(_, _)], []) ; (worker_a(_, _), worker_b(_, _)))),
+    assertion(Vs == [X1]).
+
+test(mode_declared_input_not_guarded,
+     [setup(setup_long_predicates), cleanup(teardown_declarations)]) :-
+    declare_mode(p(+, -, -)),
+    Clause = (p(X, A, B) :- worker_a(X, A), worker_b(X, B)),
+    transform_clause(Clause, [], Generated, _Helpers, _Report),
+    Generated = (p(_, _, _) :- concurrent(_, [worker_a(_, _), worker_b(_, _)], [])).
+
+test(guarded_clause_runs_in_order_when_unbound,
+     [setup(setup_long_predicates), cleanup(teardown_declarations)]) :-
+    Clause = (p(X, A, B) :- worker_a(X, A), worker_b(X, B)),
+    transform_clause(Clause, [], (Head :- Body), _Helpers, _Report),
+    Body = (Guard -> _ ; _),
+    Head = p(X2, _, _),
+    assertion(\+ call(Guard)),
+    X2 = 1,
+    assertion(call(Guard)).
+
+test(side_effect_between_keeps_order,
+     [setup(setup_long_predicates), cleanup(teardown_declarations)]) :-
+    declare_mode(p(+, -, -)),
+    Clause = (p(X, A, B) :- worker_a(X, A), writeln(hello), worker_b(X, B)),
+    transform_clause(Clause, [], Generated, _Helpers, Report),
+    assertion(Generated == Clause),
+    assertion(Report = report(_, retained_sequential_all, _)).
 
 :- end_tests(transformer).

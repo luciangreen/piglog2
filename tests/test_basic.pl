@@ -17,7 +17,8 @@ with_declarations(Decls, Test) :-
     retractall(piglog_user_thread_safe(_)),
     retractall(piglog_user_thread_unsafe(_)),
     retractall(piglog_user_deterministic(_)),
-    retractall(piglog_user_cost(_, _)).
+    retractall(piglog_user_cost(_, _)),
+    retractall(piglog_user_mode(_, _)).
 
 report_is_converted(report(_, converted, _)).
 report_is_converted(report(_, converted)).
@@ -36,6 +37,7 @@ test(two_independent_long_concurrent) :-
     declare_long(expensive_b/2),
     declare_thread_safe(expensive_a/2),
     declare_thread_safe(expensive_b/2),
+    declare_mode(p(+, ?, ?)),
     Clause = (p(X, Y, Z) :- expensive_a(X, A), expensive_b(X, B), combine(A, B, Z)),
     transform_clause(Clause, [], Generated, _Helpers, Report),
     Generated = (p(_, _, _) :- concurrent(_, [expensive_a(_, _), expensive_b(_, _)], []), _),
@@ -85,6 +87,7 @@ test(mixed_long_short_only_long_converted) :-
     declare_thread_safe(expensive/2),
     declare_long(expensive2/2),
     declare_thread_safe(expensive2/2),
+    declare_mode(p(+, ?)),
     Clause = (p(X, R) :- atom(X), expensive(X, A), expensive2(X, B), R = A+B),
     transform_clause(Clause, [], Generated, _Helpers, _Report),
     %% expensive/2 and expensive2/2 should be concurrent
